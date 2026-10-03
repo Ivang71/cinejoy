@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-theme="default">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Cinejoy</title>
+    <meta name="description" content="A front-end recreation of the Cinejoy streaming interface: hero carousel, poster rows, discovery filters, and detail pages." />
+    <meta name="theme-color" content="#95FF50" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="darkreader-lock" />
+    <meta name="application-name" content="Cinejoy" />
+    <meta name="apple-mobile-web-app-title" content="Cinejoy" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Cinejoy" />
+    <meta property="og:title" content="Cinejoy" />
+    <meta property="og:description" content="A front-end recreation of the Cinejoy streaming interface." />
+    <meta property="og:image" content="/meta.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://image.tmdb.org" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/css/app.css" />
+    <script src="/js/config.js"></script>
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <div class="ambient" id="ambient"></div>
+      <main id="view" class="page" aria-live="polite"></main>
+    </div>
+    <div id="overlay-root"></div>
+    <div id="toast" class="toast" role="status"></div>
+    <script type="module" src="/js/app.js"></script>
+    <noscript><p style="padding:24px;font-family:sans-serif">This interface needs JavaScript to render.</p></noscript>
+  </body>
+</html>
