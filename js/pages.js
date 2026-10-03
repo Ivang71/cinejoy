@@ -1,9 +1,11 @@
 // Page renderers. Each returns { title, html, mount(root) -> cleanup, back, ambient }.
 import { icon } from './icons.js';
 import { img, hrefFor, watchHref, getHome, getDiscovery, discover, getCategory, getProvider, getDetails, getSeason, getPerson, getProviderRow, search, getTrendingToday, itemFromSlug, getCatalog, items as itemsOf, GENRES, SORTS, COUNTRIES, yearsList, keyOf, live, typeFromRoute } from './data.js';
-import { esc, fmtRating, hero, mountHero, row, card, tile, wideCard, skeletonCards, dropdown, footer, scrollTopButton, mountScrollTop, infoPanel, castRow, trailerRow, commentsSection, setAmbient, setAurora, toast, modal, closeModal, trailerModal, initials, mountScrollers } from './components.js';
+import { esc, fmtRating, hero, mountHero, row, card, tile, wideCard, skeletonCards, dropdown, footer, scrollTopButton, mountScrollTop, infoPanel, castRow, trailerRow, loginModal, setAmbient, setAurora, toast, modal, closeModal, trailerModal, initials, mountScrollers } from './components.js';
 import { store, DEFAULT_SETTINGS } from './store.js';
 import { navigate } from './router.js';
+import { commentsSection, mountComments } from './comments.js';
+import { auth } from './auth.js';
 
 const PROVIDER_IDS = [8, 9, 337, 350, 2, 15, 1899, 2303, 386, 283, 43, 526, 34, 188, 192, 73, 300];
 const providerOptions = () => (getCatalog()?.providers || []).map(p => ({ value: p.id, label: p.name, img: p.logo }));
@@ -11,6 +13,19 @@ const onDD = (root, fn) => { const h = e => { if (root.contains(e.target) || e.d
 const metaSub = it => { const r = fmtRating(it.rating); return [it.year, r ? `★ ${r}` : null].filter(Boolean).join(' · '); };
 
 // ------------------------------------------------------------------ home
+function continueRow() {
+  const cat = getCatalog(); const seen = new Set(); const entries = [];
+  for (const h of store.history) {
+    const item = cat?.items?.[h.key]; if (!item || seen.has(h.key)) continue; seen.add(h.key);
+    const pk = h.season ? `${h.key}:${h.season}:${h.episode}` : h.key; const pr = store.getProgress(pk);
+    if (pr && pr.d && pr.t / pr.d > 0.95) continue;
+    entries.push({ item, href: h.season ? `/watch/tv/${item.id}/${h.season}/${h.episode}` : `/watch/movie/${item.id}`, progress: pr && pr.d ? pr.t / pr.d : 0, label: h.season ? `S${h.season}:E${h.episode}` : '' });
+    if (entries.length >= 20) break;
+  }
+  if (!entries.length) return '';
+  return `<section class="row" data-row="continue"><div class="row-head"><h2 class="row-title">Continue Watching</h2><a class="view-all" href="/continue-watching"><span>View All</span>${icon('arrowRight', 16)}</a></div><div class="row-body"><button class="scroll-btn is-left" data-action="scroll-left" aria-label="Scroll left">${icon('chevronLeft', 30)}</button><button class="scroll-btn is-right" data-action="scroll-right" aria-label="Scroll right">${icon('chevronRight', 30)}</button><div class="scroller hide-scrollbar">${entries.map(e => card(e.item, { href: e.href, progress: e.progress, badge: e.label })).join('')}</div></div></section>`;
+}
+
 export async function homePage() {
   const data = await getHome();
   const provRowState = { movie: '8', tv: '8' };
@@ -22,6 +37,7 @@ export async function homePage() {
   const html = `
     ${hero(data.slides)}
     <div class="home-rows" id="home-rows">
+      ${continueRow()}
       ${data.providers.length ? row({ id: 'providers', title: 'Browse by Provider', kind: 'tiles', items: data.providers }) : ''}
       ${data.rows.map(r => r.kind === 'provider-movies' ? `<div data-prov-row="movie">${providerRowHtml(r.id, 'movie', [])}</div>` : r.kind === 'provider-series' ? `<div data-prov-row="tv">${providerRowHtml(r.id, 'tv', [])}</div>` : row({ id: r.id, title: r.title, viewAll: r.viewAll, items: itemsOf(r.items) })).join('')}
     </div>
@@ -170,7 +186,7 @@ export async function detailPage(routeType, slug) {
         <div class="detail-actions">
           <a class="pill-btn is-primary is-lg" href="${isTv ? watchHref(d, seasonNo, 1) : watchHref(d)}">${icon('play', 18)}<span>Play</span></a>
           <button class="pill-btn is-lg is-icon${inLists ? ' is-active' : ''}" data-action="add-list" data-key="${esc(d.key)}" data-title="${esc(d.title)}" aria-label="Add to list">${icon(inLists ? 'check' : 'plus', 20)}</button>
-          <button class="pill-btn is-lg is-icon" data-action="download" aria-label="Download">${icon('download', 20)}</button>
+          <button class="pill-btn is-lg is-icon" data-action="download" data-title="${esc(d.title)}" aria-label="Download">${icon('download', 20)}</button>
           ${!isTv ? `<button class="pill-btn is-lg is-icon${store.isWatched(d.key) ? ' is-active' : ''}" data-action="toggle-watched-title" data-key="${esc(d.key)}" aria-label="Mark as watched">${icon(store.isWatched(d.key) ? 'eye' : 'eyeOff', 20)}</button>` : ''}
         </div>
         <div class="detail-meta">
@@ -204,18 +220,17 @@ export async function detailPage(routeType, slug) {
       </section>` : ''}
       ${castRow(d.cast)}
       ${s.trailers ? trailerRow(d.trailers) : ''}
-      ${commentsSection(0)}
+      ${commentsSection(d.key)}
     </div>
     ${scrollTopButton()}
     ${footer()}`;
   return {
     title: `${d.title}${d.year ? ` (${d.year})` : ''} - Cinejoy`, html, back: true, ambient: d.backdrop || d.poster || null,
     async mount(root) {
-      const cleanups = [mountScrollTop()]; mountScrollers(root);
+      const cleanups = [mountScrollTop(), mountComments(root, d.key, { onLogin: () => loginModal() })]; mountScrollers(root);
       root.addEventListener('click', e => {
         const rm = e.target.closest('[data-action="read-more"]'); if (rm) { const p = root.querySelector('#overview'); const open = p.classList.toggle('clamp-3'); rm.textContent = open ? 'Read More' : 'Read Less'; }
         const v = e.target.closest('[data-action="vote"]'); if (v) { const now = store.vote(d.key, v.dataset.dir); root.querySelectorAll('#vote-split button').forEach(b => { const on = b.dataset.dir === now; b.classList.toggle('is-on', on); b.querySelector('span').textContent = (d.votes?.[b.dataset.dir] || 0) + (on ? 1 : 0); }); }
-        const dl = e.target.closest('[data-action="download"]'); if (dl) toast('Downloads are not available in this recreation', 'info');
         const tw = e.target.closest('[data-action="toggle-watched-title"]'); if (tw) { const on = store.toggleWatched(d.key); tw.classList.toggle('is-active', on); tw.innerHTML = icon(on ? 'eye' : 'eyeOff', 20); toast(on ? 'Marked as watched' : 'Marked as unwatched'); }
         if (e.target.closest('[data-action="ep-sort"]')) { epSort = epSort === 'asc' ? 'desc' : 'asc'; root.querySelector('#ep-sort-label').textContent = epSort === 'asc' ? 'Oldest' : 'Newest'; renderEpisodes(); }
         if (e.target.closest('[data-action="ep-ratings"]')) { showRatings = !showRatings; e.target.closest('button').classList.toggle('is-active', showRatings); renderEpisodes(); }
@@ -270,13 +285,13 @@ export async function personPage(id) {
 }
 
 // ------------------------------------------------------------------ search
-const SEARCH_HEADINGS = ['What would you like to watch?', 'Discover something new', 'Find your next favorite'];
+const SEARCH_HEADINGS = ['What would you like to watch?', "Let's find a movie night pick"];
 export async function searchPage(query = '') {
-  const heading = SEARCH_HEADINGS[Math.floor(Math.random() * SEARCH_HEADINGS.length)];
+  const heading = query ? 'Discover something new' : SEARCH_HEADINGS[Math.floor(Math.random() * SEARCH_HEADINGS.length)];
   const html = `
     <div class="search-page">
       <div class="search-hero">
-        <h1>${heading}</h1>
+        <h1 id="search-h1">${heading}</h1>
         <div class="search-box"><div class="search-field">${icon('search', 20)}<input id="q" type="text" value="${esc(query)}" placeholder="Search movies, TV shows & people..." autocomplete="off" spellcheck="false" aria-label="Search" />${query ? `<button class="clear" data-action="clear-search" aria-label="Clear">${icon('x', 18)}</button>` : ''}</div></div>
       </div>
       <div class="search-results" id="search-results"></div>
@@ -297,9 +312,9 @@ export async function searchPage(query = '') {
         const r = await search(q); if (my !== seq) return;
         out.innerHTML = `
           ${r.people.length ? `<div><h2>People</h2><div class="people-row hide-scrollbar">${r.people.map(p => `<a class="person-chip" href="/person/${p.id}" aria-label="${esc(p.name)}"><div class="avatar">${p.photo ? `<img src="${img(p.photo, 'w185')}" alt="" loading="lazy" />` : `<div class="initials">${esc(initials(p.name))}</div>`}</div><span class="clamp-1">${esc(p.name)}</span></a>`).join('')}</div></div>` : ''}
-          <div><h2>Movies & TV</h2>${r.media.length ? `<div class="grid is-search" style="margin-top:16px">${r.media.map(it => card(it)).join('')}</div>` : `<p class="search-empty">No results for “${esc(q)}”.</p>`}</div>`;
+          <div><h2>Movies & TV</h2>${r.media.length ? `<div class="grid is-search is-results" style="margin-top:16px">${r.media.map(it => card(it)).join('')}</div>` : `<p class="search-empty">No results for “${esc(q)}”.</p>`}</div>`;
       };
-      input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { const q = input.value; history.replaceState({}, '', q.trim() ? `/search/${encodeURIComponent(q.trim())}` : '/search'); document.title = `${q.trim() ? q.trim() + ' - ' : ''}Search - Cinejoy`; render(q); const sf = root.querySelector('.search-field'); const clr = sf.querySelector('.clear'); if (q && !clr) sf.insertAdjacentHTML('beforeend', `<button class="clear" data-action="clear-search" aria-label="Clear">${icon('x', 18)}</button>`); if (!q && clr) clr.remove(); }, 220); });
+      input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { const q = input.value; history.replaceState({}, '', q.trim() ? `/search/${encodeURIComponent(q.trim())}` : '/search'); document.title = `${q.trim() ? q.trim() + ' - ' : ''}Search - Cinejoy`; const h1 = root.querySelector('#search-h1'); if (h1) h1.textContent = q.trim() ? 'Discover something new' : SEARCH_HEADINGS[0]; render(q); const sf = root.querySelector('.search-field'); const clr = sf.querySelector('.clear'); if (q && !clr) sf.insertAdjacentHTML('beforeend', `<button class="clear" data-action="clear-search" aria-label="Clear">${icon('x', 18)}</button>`); if (!q && clr) clr.remove(); }, 220); });
       root.addEventListener('click', e => { if (e.target.closest('[data-action="clear-search"]')) { input.value = ''; input.dispatchEvent(new Event('input')); input.focus(); } });
       if (!query) setTimeout(() => input.focus(), 50);
       await render(query);
@@ -354,10 +369,20 @@ export async function listsDiscoverPage() {
   const pub = (c?.rows || []).filter(r => !r.kind && !r.viewAll && r.items?.length).map(r => ({ id: r.id, name: r.title, slug: 'c-' + r.id, items: r.items, by: 'Cinejoy editors' }));
   const html = `
     <div class="page-top"><div class="container-narrow">
-      <div class="page-head"><div class="h1-row">${icon('compass', 30)}<h1 class="h1">Public Lists</h1></div></div>
-      ${pub.length ? `<div class="lists-stack">${pub.map(l => listCard(l, `/list/${l.slug}`)).join('')}</div>` : `<div class="glass-panel empty-panel"><span class="icon-circle">${icon('compass', 24)}</span><h2>Nothing shared yet</h2><p>Public lists appear here once other people start collecting.</p></div>`}
+      <div class="page-head" style="align-items:flex-end">
+        <div class="h1-row" style="align-items:center">${icon('compass', 30)}<div><h1 class="h1" style="line-height:1.05">Discover</h1><p id="disc-count" style="font-size:14px;color:var(--fg-50);margin-top:4px">${pub.length} public list${pub.length === 1 ? '' : 's'} from the community</p></div></div>
+        <label class="list-search">${icon('search', 16)}<input id="disc-q" type="text" placeholder="Search list names..." autocomplete="off" aria-label="Search list names" /></label>
+      </div>
+      <div id="disc-body">${pub.length ? `<div class="lists-stack">${pub.map(l => listCard(l, `/list/${l.slug}`)).join('')}</div>` : `<div class="glass-panel empty-panel"><span class="icon-circle">${icon('layers', 24)}</span><h2>Nothing shared yet</h2><p>Public lists appear here once other people start collecting.</p></div>`}</div>
     </div></div>${footer()}`;
-  return { title: 'Discover Lists - Cinejoy', html, back: true, ambient: 'aurora', mount() { return () => {}; } };
+  return {
+    title: 'Discover Lists - Cinejoy', html, back: true, ambient: 'aurora',
+    mount(root) {
+      const q = root.querySelector('#disc-q'); const body = root.querySelector('#disc-body'); const cnt = root.querySelector('#disc-count');
+      q.addEventListener('input', () => { const t = q.value.trim().toLowerCase(); const list = pub.filter(l => l.name.toLowerCase().includes(t)); cnt.textContent = `${list.length} public list${list.length === 1 ? '' : 's'} from the community`; body.innerHTML = list.length ? `<div class="lists-stack">${list.map(l => listCard(l, `/list/${l.slug}`)).join('')}</div>` : `<div class="glass-panel empty-panel"><span class="icon-circle">${icon('search', 24)}</span><h2>No matches</h2><p>No public list matches “${esc(q.value.trim())}”.</p></div>`; });
+      return () => {};
+    },
+  };
 }
 export async function listPage(slug) {
   const c = getCatalog();
@@ -398,88 +423,6 @@ export async function historyPage() {
   return { title: 'Watch History - Cinejoy', html, back: true, ambient: 'aurora', mount(root) { root.addEventListener('click', e => { if (e.target.closest('[data-action="clear-history"]')) { store.clearHistory(); document.dispatchEvent(new CustomEvent('app:rerender')); } }); return () => {}; } };
 }
 
-// ------------------------------------------------------------------ settings
-const SETTINGS_TABS = [['account', 'Account', 'user'], ['appearance', 'Appearance', 'palette'], ['playback', 'Playback', 'play'], ['servers', 'Servers', 'server'], ['subtitles', 'Subtitles', 'subtitles'], ['ads', 'Ads', 'megaphone']];
-export async function settingsPage(section = '') {
-  const s = store.settings;
-  const tog = (k, label, desc) => `<div class="setting-row"><div><div class="lbl">${label}</div><div class="desc">${desc}</div></div><div class="ctl"><button class="toggle${s[k] ? ' is-on' : ''}" role="switch" aria-checked="${!!s[k]}" aria-label="${label}" data-action="toggle-setting" data-key="${k}"></button></div></div>`;
-  const seg = (k, label, desc, opts) => `<div class="setting-row"><div><div class="lbl">${label}</div><div class="desc">${desc}</div></div><div class="ctl"><div class="segment is-small">${opts.map(([v, l]) => `<button data-action="set-setting" data-key="${k}" data-value="${v}" class="${s[k] === v ? 'is-active' : ''}">${l}</button>`).join('')}</div></div></div>`;
-  const themes = [['default', 'Default', '#ffffff'], ['lime', 'Lime', '#95ff50'], ['ocean', 'Ocean', '#5ac8ff'], ['rose', 'Rose', '#ff6b9d'], ['amber', 'Amber', '#ffb547']];
-  const html = `
-    <div class="page-top"><div class="container-narrow">
-      <div class="page-head"><div class="h1-row">${icon('gear', 30)}<h1 class="h1">Settings</h1></div></div>
-      <div class="settings-tabs hide-scrollbar">${SETTINGS_TABS.map(([id, l, ic]) => `<a class="settings-tab${(section || 'account') === id ? ' is-active' : ''}" href="/settings#${id}" data-tab="${id}">${icon(ic, 16)}${l}</a>`).join('')}</div>
-
-      <section class="glass-panel settings-section" id="account"><h2 class="sec-title">Account</h2><p class="sec-desc">Sign in to sync your settings and watch progress across devices.</p>
-        <div class="setting-row"><div><div class="lbl">${s.displayName ? `Signed in as ${esc(s.displayName)}` : 'Not signed in'}</div><div class="desc">${s.displayName ? 'Your preferences are stored on this device.' : 'Create an account or sign in to sync your data'}</div></div><div class="ctl"><button class="pill-btn is-primary" data-action="login">${s.displayName ? 'Manage' : 'Sign In'}</button></div></div>
-        <button class="connect-row" data-action="connect" data-name="Trakt"><span class="icon-circle">${icon('check', 18)}</span><span><div class="t">Connect Trakt</div><div class="s">Sync your watchlist, history and progress from Trakt</div></span></button>
-        <button class="connect-row" data-action="connect" data-name="Simkl"><span class="icon-circle">${icon('layers', 18)}</span><span><div class="t">Connect Simkl</div><div class="s">Sync your watchlist, history and progress from Simkl</div></span></button>
-      </section>
-
-      <section class="glass-panel settings-section" id="appearance"><h2 class="sec-title">Appearance</h2><p class="sec-desc">Change the look of the site to suit your needs.</p>
-        <div class="setting-row"><div><div class="lbl">Theme</div><div class="desc">Pick a color palette for the entire interface.</div></div><div class="ctl">${dropdown({ id: 'theme', label: 'Theme', value: s.theme, options: themes.map(([v, l]) => ({ value: v, label: l })), align: 'right', dot: true })}</div></div>
-        ${seg('episodeView', 'Episode View Style', 'Choose how episodes appear on series pages.', [['carousel', 'Carousel'], ['grid', 'Grid']])}
-        ${seg('detailView', 'Detail View Type', 'Pick between a full page or a compact modal.', [['page', 'Page'], ['modal', 'Modal']])}
-        ${tog('imageLogos', 'Use Image Logos', 'Display movie and series titles as image logos.')}
-        ${tog('trailers', 'Trailers', 'Show trailers on detail pages.')}
-        ${tog('spoilerFree', 'Spoiler-Free Mode', 'Hide information about episodes.')}
-        ${tog('reduceMotion', 'Reduce Motion', 'Reduce effects.')}
-        ${tog('flatUi', 'Flat UI', 'Replace frosted glass with solid surfaces.')}
-      </section>
-
-      <section class="glass-panel settings-section" id="playback"><h2 class="sec-title">Playback</h2><p class="sec-desc">Configure how your player behaves.</p>
-        ${tog('autoplay', 'Autoplay', 'Automatically play the next episode when one ends.')}
-        ${tog('autoSkipIntro', 'Auto Skip Intro', 'Jump past the intro on its own, instead of showing the Skip Intro button.')}
-        <div class="setting-row"><div><div class="lbl">Player Controls</div><div class="desc">Rearrange the player's buttons, or take the ones you don't use off it.</div></div><div class="ctl"><a class="pill-btn" href="/settings/player">Customize</a></div></div>
-        <div class="setting-row"><div><div class="lbl">Seek Time</div><div class="desc">Change how far you skip forwards or backwards.</div></div><div class="ctl">${dropdown({ id: 'seekTime', label: 'Seek', value: s.seekTime, options: [5, 10, 15, 30, 60].map(v => ({ value: v, label: `${v} seconds` })), align: 'right' })}</div></div>
-        ${tog('autoSubtitles', 'Auto Subtitles', 'Automatically select subtitles in your preferred language when available.')}
-      </section>
-
-      <section class="glass-panel settings-section" id="servers"><h2 class="sec-title">Server Order</h2><p class="sec-desc">Set which sources would be tried first when a title loads. This recreation ships without any playback sources, so the order is cosmetic.</p>
-        <div class="order-list" id="order-list">${s.serverOrder.map((n, i) => `<div class="order-item"><span class="grip">${icon('grip', 16)}</span><span class="num">${i + 1}</span><span>${esc(n)}</span><span class="moves"><button data-action="order-move" data-i="${i}" data-d="-1" aria-label="Move up">${icon('chevronUp', 16)}</button><button data-action="order-move" data-i="${i}" data-d="1" aria-label="Move down">${icon('chevronDown', 16)}</button></span></div>`).join('')}</div>
-      </section>
-
-      <section class="glass-panel settings-section" id="subtitles"><h2 class="sec-title">Subtitles</h2><p class="sec-desc">Improve readability and customization for subtitles.</p>
-        ${seg('subtitleFont', 'Font', 'Choose your preferred subtitle font.', [['Cinejoy', 'Cinejoy'], ['Classic', 'Classic'], ['Montserrat', 'Montserrat']])}
-        <div class="setting-row"><div><div class="lbl">Text Size</div><div class="desc">Adjust subtitle size for your display.</div></div><div class="ctl"><span class="tabular" id="sub-size" style="font-size:14px;color:var(--fg-70);min-width:44px;text-align:right">${s.subtitleSize}%</span><input type="range" min="50" max="200" step="10" value="${s.subtitleSize}" data-action="range-setting" data-key="subtitleSize" aria-label="Text size" /></div></div>
-        <div class="setting-row"><div><div class="lbl">Text Color</div><div class="desc">Pick a high-contrast subtitle color.</div></div><div class="ctl"><div class="color-dots">${['#ffffff', '#ffff00', '#00ffff', '#ff00ff', '#95ff50'].map(c => `<button class="color-dot${s.subtitleColor === c ? ' is-active' : ''}" style="background:${c}" data-action="set-setting" data-key="subtitleColor" data-value="${c}" aria-label="${c}"></button>`).join('')}</div></div></div>
-        ${tog('subtitleBlur', 'Background Blur', 'Blur the area behind subtitles for readability.')}
-        <div class="setting-row"><div><div class="lbl">Preview</div><div class="desc">How subtitles would appear in the player.</div></div><div class="ctl"><span id="sub-preview" style="padding:6px 12px;border-radius:8px;font-weight:600;font-size:${16 * s.subtitleSize / 100}px;color:${s.subtitleColor};${s.subtitleBlur ? 'background:rgba(0,0,0,.5);backdrop-filter:blur(6px)' : 'text-shadow:0 2px 4px #000'};font-family:${s.subtitleFont === 'Montserrat' ? 'Montserrat,Inter' : s.subtitleFont === 'Classic' ? 'Arial,Helvetica' : 'Inter'}">Sample subtitle</span></div></div>
-      </section>
-
-      <section class="glass-panel settings-section" id="ads"><h2 class="sec-title">Ads</h2><p class="sec-desc">This recreation never loads advertising or tracking scripts. The switch is kept for interface parity.</p>
-        ${tog('ads', 'Show Ads', 'Allow sponsored placements in the interface.')}
-      </section>
-
-      <div style="display:flex;justify-content:flex-end;margin-bottom:24px"><button class="pill-btn" data-action="reset-settings">${icon('refresh', 16)}<span>Reset to defaults</span></button></div>
-    </div></div>${footer()}`;
-  return {
-    title: 'Settings - Cinejoy', html, back: true, ambient: 'aurora',
-    mount(root) {
-      const rerender = () => document.dispatchEvent(new CustomEvent('app:rerender'));
-      root.addEventListener('click', e => {
-        const t = e.target.closest('[data-action="toggle-setting"]'); if (t) { store.setSetting(t.dataset.key, !store.settings[t.dataset.key]); const on = store.settings[t.dataset.key]; t.classList.toggle('is-on', on); t.setAttribute('aria-checked', on); if (t.dataset.key === 'subtitleBlur') rerender(); return; }
-        const ss = e.target.closest('[data-action="set-setting"]'); if (ss) { const v = ss.dataset.value; store.setSetting(ss.dataset.key, isNaN(Number(v)) || v === '' ? v : (ss.dataset.key === 'subtitleColor' ? v : Number(v))); rerender(); return; }
-        const om = e.target.closest('[data-action="order-move"]'); if (om) { const i = Number(om.dataset.i), d = Number(om.dataset.d), arr = [...store.settings.serverOrder]; const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; store.setSetting('serverOrder', arr); rerender(); return; }
-        if (e.target.closest('[data-action="reset-settings"]')) { store.resetSettings(); toast('Settings reset'); rerender(); return; }
-        const cn = e.target.closest('[data-action="connect"]'); if (cn) toast(`${cn.dataset.name} sync is not available in this recreation`, 'info');
-        const tab = e.target.closest('.settings-tab'); if (tab) { e.preventDefault(); root.querySelectorAll('.settings-tab').forEach(x => x.classList.toggle('is-active', x === tab)); root.querySelector('#' + tab.dataset.tab)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); history.replaceState({}, '', '/settings#' + tab.dataset.tab); }
-      });
-      root.addEventListener('input', e => { const r = e.target.closest('[data-action="range-setting"]'); if (r) { store.setSetting(r.dataset.key, Number(r.value)); root.querySelector('#sub-size').textContent = r.value + '%'; root.querySelector('#sub-preview').style.fontSize = (16 * r.value / 100) + 'px'; } });
-      const off = onDD(root, (id, value) => { if (id === 'theme') { store.setSetting('theme', value); rerender(); } if (id === 'seekTime') { store.setSetting('seekTime', Number(value)); rerender(); } });
-      if (section) setTimeout(() => root.querySelector('#' + section)?.scrollIntoView({ block: 'start' }), 50);
-      return off;
-    },
-  };
-}
-export async function playerSettingsPage() {
-  const html = `<div class="page-top"><div class="container-narrow"><div class="page-head"><div class="h1-row">${icon('settingsSliders', 30)}<h1 class="h1">Player Controls</h1></div></div>
-    <section class="glass-panel settings-section"><h2 class="sec-title">Control layout</h2><p class="sec-desc">Toggle which controls appear on the player bar.</p>
-      ${['Play / Pause', 'Seek backward', 'Seek forward', 'Volume', 'Subtitles', 'Playback speed', 'Picture in picture', 'Fullscreen'].map((n, i) => `<div class="setting-row"><div><div class="lbl">${n}</div></div><div class="ctl"><button class="toggle is-on" role="switch" aria-checked="true" data-action="demo-toggle"></button></div></div>`).join('')}
-    </section></div></div>${footer()}`;
-  return { title: 'Player Controls - Cinejoy', html, back: true, ambient: 'aurora', mount(root) { root.addEventListener('click', e => { const t = e.target.closest('[data-action="demo-toggle"]'); if (t) { const on = !t.classList.contains('is-on'); t.classList.toggle('is-on', on); t.setAttribute('aria-checked', on); } }); return () => {}; } };
-}
-
 // ------------------------------------------------------------------ shorts
 export async function shortsPage() {
   const tr = await getTrendingToday();
@@ -503,33 +446,6 @@ export async function shortsPage() {
       document.addEventListener('keydown', key); let y0 = null; root.addEventListener('wheel', e => { if (Math.abs(e.deltaY) > 30) { i = (i + (e.deltaY > 0 ? 1 : -1) + feed.length) % Math.max(1, feed.length); re(); } }, { passive: true });
       root.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true }); root.addEventListener('touchend', e => { if (y0 == null) return; const dy = e.changedTouches[0].clientY - y0; if (Math.abs(dy) > 60) { i = (i + (dy < 0 ? 1 : -1) + feed.length) % Math.max(1, feed.length); re(); } y0 = null; });
       return () => document.removeEventListener('keydown', key);
-    },
-  };
-}
-
-// ------------------------------------------------------------------ watch
-export async function watchPage(type, id, season, episode) {
-  type = typeFromRoute(type);
-  const d = await getDetails(type, Number(id));
-  let ep = null; if (type === 'tv') { try { ep = (await getSeason(d.id, Number(season))).find(e => e.num === Number(episode)) || null; } catch { ep = null; } }
-  const sub = type === 'tv' ? `S${season} · E${episode}${ep?.title ? ` · ${ep.title}` : ''}` : (d.year || '');
-  const trailer = d.trailers?.[0];
-  const html = `
-    <div class="watch-page" id="watch">
-      <div class="watch-top"><button class="back-btn" data-action="back" aria-label="Go back">${icon('arrowLeft', 26)}</button><div><div class="t">${esc(d.title)}</div><div class="s">${esc(sub)}</div></div></div>
-      <div class="watch-stage" id="stage">
-        ${d.backdrop || ep?.still ? `<img class="bg" src="${img(ep?.still || d.backdrop, 'w1280')}" alt="" />` : ''}
-        <div class="watch-msg"><span class="big">${icon('film', 30)}</span><h2>No playback source configured</h2><p>This interface recreation does not include any streaming servers or media files. ${trailer ? 'You can watch the official trailer instead.' : ''}</p>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">${trailer ? `<button class="pill-btn is-primary is-lg" data-action="watch-trailer" data-yt="${esc(trailer.youtubeKey)}">${icon('play', 18)}<span>Play trailer</span></button>` : ''}<a class="pill-btn is-lg" href="${hrefFor(d)}">${icon('info', 18)}<span>Title details</span></a></div></div>
-      </div>
-      <div class="watch-controls"><div class="bar"><span id="bar"></span></div><div class="btns"><button aria-label="Play">${icon('play', 20)}</button><button aria-label="Seek back">${icon('chevronLeft', 20)}</button><button aria-label="Seek forward">${icon('chevronRight', 20)}</button><button aria-label="Volume">${icon('volume', 20)}</button><span class="time">0:00 / ${esc(d.runtimeLabel || ep?.runtimeLabel || '--:--')}</span><span class="spacer"></span><button aria-label="Subtitles">${icon('subtitles', 20)}</button><button aria-label="Settings">${icon('gear', 20)}</button><button aria-label="Fullscreen">${icon('maximize', 20)}</button></div></div>
-    </div>`;
-  return {
-    title: `${d.title} - Cinejoy`, html, back: true, bare: true,
-    mount(root) {
-      store.pushHistory({ key: d.key, season: type === 'tv' ? Number(season) : null, episode: type === 'tv' ? Number(episode) : null, title: d.title });
-      root.addEventListener('click', e => { const b = e.target.closest('[data-action="watch-trailer"]'); if (b) { root.querySelector('#stage').innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(b.dataset.yt)}?autoplay=1&rel=0" title="Trailer" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`; root.querySelector('.watch-controls').style.display = 'none'; } });
-      return () => {};
     },
   };
 }

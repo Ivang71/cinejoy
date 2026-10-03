@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Cinejoy">
+  <defs>
+    <mask id="cut">
+      <rect width="64" height="64" fill="#fff"/>
+      <rect x="9" y="10" width="6" height="6" rx="1.5" fill="#000"/>
+      <rect x="9" y="22" width="6" height="6" rx="1.5" fill="#000"/>
+      <rect x="9" y="34" width="6" height="6" rx="1.5" fill="#000"/>
+      <rect x="9" y="46" width="6" height="6" rx="1.5" fill="#000"/>
+      <path d="M24 15.5c0-2.3 2.5-3.7 4.4-2.5l22.4 14.7c1.8 1.2 1.8 3.9 0 5.1L28.4 47.5c-1.9 1.2-4.4-.2-4.4-2.5z" fill="#000"/>
+      <path d="M40 8l1.8 4.2L46 14l-4.2 1.8L40 20l-1.8-4.2L34 14l4.2-1.8z" fill="#000"/>
+    </mask>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#95ff50" mask="url(#cut)"/>
+</svg>

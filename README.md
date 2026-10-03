@@ -11,12 +11,16 @@ scripts, and the logo. No code, stylesheets or brand assets were copied from the
 
 ## What it is not
 
-- It does **not** stream or host any video. The Play button opens a player shell that explains
-  there is no playback source, and offers the official trailer where one exists.
-- It ships **no ads, analytics or tracking**.
-- Poster, backdrop and logo artwork is **not stored in this repo**. Images are loaded at runtime
-  from The Movie Database (TMDB) image CDN. This product uses the TMDB API but is not endorsed
-  or certified by TMDB.
+- It ships **no media sources**. The player is a complete HTML5 player (HLS, subtitles, speed,
+  fit, volume boost, picture in picture, resume, next episode, rearrangeable controls), but it
+  has nothing to play until the site owner adds sources they are entitled to use in
+  `js/config.js`. With none configured it shows its error screen and offers the official trailer.
+- It ships **no ads, analytics or tracking**, and no third-party stream integrations.
+- Accounts, comments, votes and lists are **local to the browser**. There is no server, so
+  nothing is shared between devices or users.
+- Poster, backdrop and logo artwork is **not stored in this repo**. Images load at runtime from
+  The Movie Database (TMDB) image CDN. This product uses the TMDB API but is not endorsed or
+  certified by TMDB.
 
 ## Running it
 
@@ -58,13 +62,38 @@ js/app.js               routes, global actions, page lifecycle
 js/pages.js             page renderers
 js/components.js        header, hero, rows, cards, dropdowns, modals
 js/data.js              snapshot + live TMDB data layer
-js/store.js             localStorage-backed settings, lists, history
+js/store.js             localStorage-backed settings, lists, history, progress
+js/auth.js              local 16-digit account flow
+js/comments.js          local comment threads
+js/player.js            watch page, player, controls editor
+js/settings.js          settings page and theme picker
+js/themes.js            theme palettes and custom theme generator
+js/liquid.js            WebGL / CSS / canvas backgrounds
 js/router.js            history router with hash fallback for file://
 js/icons.js             inline SVG icon set
 brand/                  logomark (original design)
 data/                   metadata snapshot
 scripts/                dev server and data build script
 ```
+
+## Themes and backgrounds
+
+Eleven themes (Default, Surface, Aero, Blue, Teal, Forest, Mocha, Red, Pink, Dark, AMOLED) plus a
+Custom theme generated from any base colour. Backgrounds are drawn with original code: a WebGL
+domain-warped noise shader for the liquid themes, layered CSS for Aero, and a canvas starfield for
+AMOLED. "Reduce Motion" freezes them.
+
+## Accounts
+
+Sign in uses a random 16-digit account number, like the original flow. Register generates one,
+shows it once, and stores only a SHA-256 hash in localStorage. Comments, replies and votes on
+detail pages are stored per title in the browser and require being signed in.
+
+## Player
+
+`js/player.js`. Keyboard: Space/K play, J/L or arrows seek, Up/Down volume, M mute, F fullscreen,
+C cycle subtitles, N next episode, 0-9 jump, Esc back. `/settings/player` lets you drag controls
+between the bar and a tray; the layout is saved and applied to the player.
 
 ## Client-side features
 

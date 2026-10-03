@@ -1,10 +1,14 @@
 // Application bootstrap: routing, global actions, page lifecycle.
 import { route, startRouter, onNavigate, navigate, back, currentPath } from './router.js';
 import { loadCatalog, getItem, getDetails, hrefFor, watchHref, img } from './data.js';
-import { header, mountHeader, profileMenu, closeMenus, setAmbient, setAurora, addToListModal, trailerModal, loginModal, toast, modal, closeModal, esc, fmtRating } from './components.js';
+import { header, mountHeader, profileMenu, closeMenus, setAmbient, setAurora, addToListPopover, downloadModal, trailerModal, loginModal, toast, modal, closeModal, esc, fmtRating } from './components.js';
 import { store, applySettings } from './store.js';
 import { icon } from './icons.js';
 import * as pages from './pages.js';
+import { settingsPage } from './settings.js';
+import { watchPage, playerSettingsPage } from './player.js';
+import { createBackground } from './liquid.js';
+import { applyTheme } from './themes.js';
 
 const view = document.getElementById('view');
 let cleanup = null; let currentMatch = null; let renderSeq = 0;
@@ -24,11 +28,11 @@ route('/lists', () => pages.listsPage());
 route('/lists/discover', () => pages.listsDiscoverPage());
 route('/list/:slug', p => pages.listPage(p.slug));
 route('/continue-watching', () => pages.historyPage());
-route('/settings', () => pages.settingsPage((location.hash || '').replace('#', '')));
-route('/settings/player', () => pages.playerSettingsPage());
+route('/settings', () => settingsPage((location.hash || '').replace('#', '')));
+route('/settings/player', () => playerSettingsPage());
 route('/shorts', () => pages.shortsPage());
-route('/watch/movie/:id', p => pages.watchPage('movie', p.id));
-route('/watch/tv/:id/:season/:episode', p => pages.watchPage('tv', p.id, p.season, p.episode));
+route('/watch/movie/:id', p => watchPage('movie', p.id));
+route('/watch/tv/:id/:season/:episode', p => watchPage('tv', p.id, p.season, p.episode));
 
 async function render(m, path) {
   const seq = ++renderSeq;
@@ -58,7 +62,8 @@ document.addEventListener('click', e => {
   if (a === 'back') { e.preventDefault(); back(); }
   else if (a === 'profile-menu') { e.preventDefault(); e.stopPropagation(); profileMenu(el); }
   else if (a === 'login') { e.preventDefault(); closeMenus(); loginModal(); }
-  else if (a === 'add-list') { e.preventDefault(); const key = el.dataset.key; if (!key) return; const it = getItem(key); addToListModal(key, el.dataset.title || it?.title); }
+  else if (a === 'add-list') { e.preventDefault(); const key = el.dataset.key; if (!key) return; const it = getItem(key); addToListPopover(el, key, el.dataset.title || it?.title); }
+  else if (a === 'download') { e.preventDefault(); downloadModal(el.dataset.title); }
   else if (a === 'trailer') { e.preventDefault(); trailerModal(el.dataset.yt); }
   else if (a === 'scroll-top') { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   else if (a === 'toggle-dd') { e.preventDefault(); e.stopPropagation(); const dd = el.closest('.dropdown'); const open = dd.classList.contains('is-open'); closeMenus(); if (!open) { dd.classList.add('is-open'); el.setAttribute('aria-expanded', 'true'); } }
@@ -72,7 +77,7 @@ document.addEventListener('app:rerender', () => { if (currentMatch !== undefined
 // Detail "modal" preference: open a compact preview instead of navigating.
 document.addEventListener('click', e => {
   if (store.settings.detailView !== 'modal') return;
-  const a = e.target.closest('a.card[data-key]'); if (!a || e.metaKey || e.ctrlKey) return;
+  const a = e.target.closest('a.card[data-key]:not([data-no-modal])'); if (!a || e.metaKey || e.ctrlKey) return;
   const it = getItem(a.dataset.key); if (!it) return;
   e.preventDefault(); e.stopImmediatePropagation();
   const r = fmtRating(it.rating);
@@ -83,8 +88,10 @@ document.addEventListener('click', e => {
 
 // ---------------------------------------------------------------- boot
 (async () => {
-  applySettings();
-  store.subscribe(applySettings);
+  const bg = createBackground(document.getElementById('theme-bg'));
+  const sync = () => { applySettings(); applyTheme(store.settings, bg); };
+  sync(); let lastKey = '';
+  store.subscribe(() => { const k = [store.settings.theme, store.settings.customPrimary, store.settings.reduceMotion, store.settings.flatUi].join('|'); if (k !== lastKey) { lastKey = k; sync(); } });
   view.innerHTML = `<div class="hero"><div class="hero-media skeleton" style="border-radius:0"></div></div>`;
   await loadCatalog();
   onNavigate(render);

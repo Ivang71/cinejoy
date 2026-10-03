@@ -19,15 +19,21 @@ export const DEFAULT_SETTINGS = {
   subtitleColor: '#ffffff',
   subtitleBlur: false,
   ads: true,
-  serverOrder: ['Nebula', 'Lisbon', 'Scout', 'Riga', 'Solara', 'Athens'],
+  serverOrder: [],
   displayName: '',
+  customPrimary: '#8a7bff',
+  playerLayout: null,
+  volumeBoost: 100,
+  videoFitMode: 'contain',
+  subtitlePosition: 0,
+  defaultSubtitleLanguage: 'en',
 };
 
 function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
 
 const listeners = new Set();
 let state = Object.assign(
-  { settings: { ...DEFAULT_SETTINGS }, lists: [], history: [], votes: {}, watched: {}, listPrefs: {} },
+  { settings: { ...DEFAULT_SETTINGS }, lists: [], history: [], votes: {}, watched: {}, listPrefs: {}, progress: {} },
   safeParse((() => { try { return localStorage.getItem(KEY); } catch { return null; } })()) || {}
 );
 state.settings = { ...DEFAULT_SETTINGS, ...(state.settings || {}) };
@@ -36,6 +42,8 @@ function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage unavailable */ }
   listeners.forEach(fn => { try { fn(state); } catch (e) { console.error(e); } });
 }
+
+function persistQuiet() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage unavailable */ } }
 
 export const store = {
   get state() { return state; },
@@ -82,6 +90,11 @@ export const store = {
   removeHistory(idx) { state.history = state.history.filter((_, i) => i !== idx); persist(); },
   clearHistory() { state.history = []; persist(); },
 
+  // playback progress (seconds), keyed by "type:id[:season:episode]"
+  setProgress(k, t, d) { state.progress = { ...(state.progress || {}), [k]: { t: Math.floor(t), d: Math.floor(d), at: Date.now() } }; persistQuiet(); },
+  getProgress(k) { return (state.progress || {})[k] || null; },
+  clearProgress(k) { const p = { ...(state.progress || {}) }; delete p[k]; state.progress = p; persistQuiet(); },
+
   // votes & watched
   vote(key, dir) { const cur = state.votes[key]; state.votes = { ...state.votes, [key]: cur === dir ? null : dir }; persist(); return state.votes[key]; },
   getVote(key) { return state.votes[key] || null; },
@@ -96,7 +109,6 @@ export function slugify(s) {
 
 export function applySettings() {
   const s = state.settings; const html = document.documentElement;
-  html.dataset.theme = s.theme;
   html.dataset.flatUi = s.flatUi ? 'on' : 'off';
   html.dataset.reduceMotion = s.reduceMotion ? 'on' : 'off';
 }

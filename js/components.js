@@ -2,6 +2,7 @@
 import { icon } from './icons.js';
 import { img, hrefFor, watchHref, GENRES } from './data.js';
 import { store } from './store.js';
+import { auth, digitsOnly, formatNumber } from './auth.js';
 
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const fmtRating = r => (r == null || r === '' ? null : Number(r).toFixed(1));
@@ -65,9 +66,9 @@ export function profileMenu(anchor) {
   closeMenus();
   const r = anchor.getBoundingClientRect();
   const el = document.createElement('div'); el.className = 'popover-menu'; el.setAttribute('role', 'menu');
-  const name = store.settings.displayName;
+  const name = auth.signedIn ? auth.displayName() : '';
   el.innerHTML = `
-    <button role="menuitem" data-action="login">${icon(name ? 'user' : 'login', 18)}<span>${name ? esc(name) : 'Login'}</span></button>
+    <button role="menuitem" data-action="login">${icon(name ? 'user' : 'login', 18)}<span class="clamp-1">${name ? esc(name) : 'Login'}</span></button>
     <div class="sep"></div>
     <a role="menuitem" href="/settings">${icon('gear', 18)}<span>Settings</span></a>
     <a role="menuitem" href="/continue-watching">${icon('history', 18)}<span>Watch History</span></a>
@@ -161,15 +162,16 @@ export function mountHero(root, slides, onChange) {
 }
 
 // ------------------------------------------------------------ cards / rows
-export function card(it, { lazy = true } = {}) {
+export function card(it, { lazy = true, href = null, progress = null, badge = '' } = {}) {
   if (!it) return '';
   const r = fmtRating(it.rating);
   const sub = `${it.year ? `<span>${it.year}</span>` : ''}${r ? `<span class="rt">${icon('star', 12)}${r}</span>` : ''}`;
   return `
-  <a class="card" href="${hrefFor(it)}" aria-label="${esc(it.title)}" data-key="${esc(it.key)}">
+  <a class="card" href="${href || hrefFor(it)}" aria-label="${esc(it.title)}" data-key="${esc(it.key)}"${href ? ' data-no-modal' : ''}>
     <div class="card-poster">
       ${it.poster ? `<img src="${img(it.poster, 'w500')}" alt="${esc(it.title)}" ${lazy ? 'loading="lazy"' : ''} decoding="async" />` : `<div class="poster-fallback">${esc(it.title)}</div>`}
       <div class="veil"></div>
+      ${badge ? `<span class="card-badge">${esc(badge)}</span>` : ''}${progress != null && progress > 0 ? `<div class="card-progress"><i style="width:${Math.max(3, Math.min(100, progress * 100)).toFixed(1)}%"></i></div>` : ''}
       <div class="card-overlay"><span class="play-chip">${icon('play', 22)}</span><div><h3 class="clamp-2">${esc(it.title)}</h3><div class="sub">${sub}</div></div></div>
     </div>
     <div class="card-caption"><h3 class="clamp-1">${esc(it.title)}</h3><div class="sub">${r ? `<span class="rt">${icon('star', 10)}${r}</span>` : ''}${it.year ? `<span>${it.year}</span>` : ''}</div></div>
@@ -235,8 +237,8 @@ export function footer() {
   return `
   <footer class="site-footer">
     <div class="footer-inner">
-      <a class="wordmark" href="/" aria-label="Home"><img src="/brand/logomark-white.svg" alt="" width="34" height="34" /><span>Cinejoy</span></a>
-      <p class="footer-note">This is an independent front-end recreation of a streaming interface, built for design study. It does not host, store, or distribute any media files. Title artwork and metadata are served from The Movie Database (TMDB). This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+      <a class="wordmark" href="/" aria-label="Home"><img src="/brand/logomark-accent.svg" alt="" width="34" height="34" /><span class="wm-text">CINE<b>JOY</b></span></a>
+      <p class="footer-note">This is an independent recreation of a streaming interface. It does not host, store, or distribute any media files. Titles, artwork and metadata are provided by TMDB, and this product is not endorsed or certified by TMDB.</p>
       ${email ? `<a class="footer-link" href="mailto:${esc(email)}">${esc(email)}</a>` : ''}
     </div>
   </footer>`;
@@ -299,34 +301,115 @@ export function closeModal() { document.getElementById('modal-root')?.remove(); 
 export function trailerModal(ytKey) {
   modal(`<div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(ytKey)}?autoplay=1&rel=0" title="Trailer" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>`, { wide: true });
 }
-export function addToListModal(key, title) {
+// ---- add to list popover ------------------------------------------------
+export function addToListPopover(anchor, key, title) {
+  closeMenus();
+  const el = document.createElement('div'); el.className = 'popover-menu list-popover'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Add to list');
+  let creating = false;
   const render = () => {
     const lists = store.lists;
-    return `
-      <h2>Add to list</h2><p>${esc(title || 'Choose a list for this title.')}</p>
-      <div class="choice-list">
-        ${lists.length ? lists.map(l => `<button data-action="toggle-list-item" data-list="${l.id}" data-key="${esc(key)}" class="${l.items.includes(key) ? 'is-in' : ''}"><span>${esc(l.name)} <small style="color:var(--fg-40)">· ${l.items.length}</small></span>${l.items.includes(key) ? icon('check', 18) : icon('plus', 18)}</button>`).join('') : `<p style="margin:0">You have no lists yet.</p>`}
-      </div>
-      <div class="field"><label for="new-list-name">New list</label><input id="new-list-name" type="text" placeholder="e.g. Weekend watchlist" /></div>
-      <div class="acts"><button class="pill-btn" data-action="close-modal">Done</button><button class="pill-btn is-primary" data-action="create-list-and-add" data-key="${esc(key)}">Create & add</button></div>`;
+    el.innerHTML = `
+      <div class="lp-head">Add to List</div>
+      <div class="lp-body">${lists.length ? lists.map(l => `<button class="lp-row${l.items.includes(key) ? ' is-in' : ''}" data-lp="toggle" data-list="${l.id}"><span class="lp-name clamp-1">${esc(l.name)}</span><span class="lp-count">${l.items.length}</span><span class="lp-check">${l.items.includes(key) ? icon('check', 16) : ''}</span></button>`).join('') : `<p class="lp-empty">No lists yet. Create one below!</p>`}</div>
+      <div class="lp-foot">${creating ? `<form class="lp-create" data-lp="form"><input id="lp-name" type="text" maxlength="60" placeholder="List name" autocomplete="off" aria-label="List name" /><button class="pill-btn is-primary" type="submit">Add</button></form>` : `<button class="lp-new" data-lp="new">${icon('plus', 16)}<span>Create New List</span></button>`}</div>`;
+    if (creating) setTimeout(() => el.querySelector('#lp-name')?.focus(), 10);
   };
-  const root = modal(render());
-  root.addEventListener('click', e => {
-    const t = e.target.closest('[data-action="toggle-list-item"]');
-    if (t) { const added = store.toggleInList(t.dataset.list, t.dataset.key); toast(added ? 'Added to list' : 'Removed from list', added ? 'check' : 'x'); root.querySelector('.modal').innerHTML = render(); return; }
-    const c = e.target.closest('[data-action="create-list-and-add"]');
-    if (c) { const inp = root.querySelector('#new-list-name'); const name = inp.value.trim(); if (!name) { inp.focus(); return; } const l = store.createList(name); store.toggleInList(l.id, c.dataset.key); toast(`Added to “${l.name}”`); root.querySelector('.modal').innerHTML = render(); }
+  render();
+  document.getElementById('overlay-root').appendChild(el);
+  const place = () => {
+    const r = anchor.getBoundingClientRect(); const w = 256; const mobile = window.innerWidth < 640;
+    el.style.width = w + 'px';
+    if (mobile) { el.style.left = Math.max(8, (window.innerWidth - w) / 2) + 'px'; el.style.top = Math.min(r.bottom + 10, window.innerHeight - el.offsetHeight - 90) + 'px'; }
+    else { el.style.left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8) + 'px'; el.style.top = Math.min(r.bottom + 8, window.innerHeight - el.offsetHeight - 12) + 'px'; }
+  };
+  place();
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    const t = e.target.closest('[data-lp]'); if (!t) return;
+    if (t.dataset.lp === 'toggle') { const added = store.toggleInList(t.dataset.list, key); toast(added ? 'Added to list' : 'Removed from list', added ? 'check' : 'x'); render(); place(); syncAddButtons(key); }
+    else if (t.dataset.lp === 'new') { creating = true; render(); place(); }
   });
+  el.addEventListener('submit', e => {
+    e.preventDefault(); const inp = el.querySelector('#lp-name'); const name = inp.value.trim(); if (!name) { inp.focus(); return; }
+    const l = store.createList(name); store.toggleInList(l.id, key); toast(`Added to “${l.name}”`); creating = false; render(); place(); syncAddButtons(key);
+  });
+  const off = e => { if (!el.contains(e.target)) { close(); } };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  const close = () => { el.remove(); document.removeEventListener('mousedown', off, true); document.removeEventListener('keydown', onKey); };
+  setTimeout(() => { document.addEventListener('mousedown', off, true); document.addEventListener('keydown', onKey); }, 0);
 }
-export function loginModal() {
-  const root = modal(`
-    <h2>${store.settings.displayName ? 'Your profile' : 'Sign in'}</h2>
-    <p>This recreation has no backend. Set a display name to personalise the interface on this device.</p>
-    <div class="field"><label for="dn">Display name</label><input id="dn" type="text" value="${esc(store.settings.displayName)}" placeholder="Your name" /></div>
-    <div class="acts">${store.settings.displayName ? `<button class="pill-btn" data-action="sign-out">Sign out</button>` : ''}<button class="pill-btn" data-action="close-modal">Cancel</button><button class="pill-btn is-primary" data-action="save-name">Continue</button></div>`);
-  root.addEventListener('click', e => {
-    if (e.target.closest('[data-action="save-name"]')) { store.setSetting('displayName', root.querySelector('#dn').value.trim()); closeModal(); toast('Profile updated'); document.dispatchEvent(new CustomEvent('app:rerender')); }
-    if (e.target.closest('[data-action="sign-out"]')) { store.setSetting('displayName', ''); closeModal(); toast('Signed out'); document.dispatchEvent(new CustomEvent('app:rerender')); }
+function syncAddButtons(key) {
+  const inList = store.listsContaining(key).length > 0;
+  document.querySelectorAll(`[data-action="add-list"][data-key="${CSS.escape(key)}"].pill-btn`).forEach(b => { b.classList.toggle('is-active', inList); b.innerHTML = icon(inList ? 'check' : 'plus', 20); });
+}
+
+// ---- sign in / register -------------------------------------------------
+export function loginModal(initialTab = 'signin') {
+  closeModal();
+  let tab = initialTab; let reveal = false; let value = ''; let error = ''; let busy = false; let generated = null; let saved = false;
+  const root = document.createElement('div'); root.className = 'modal-root is-sheet'; root.id = 'modal-root';
+  document.getElementById('overlay-root').appendChild(root);
+  const user = auth.user;
+  const mark = `<img class="auth-mark" src="/brand/logomark-white.svg" alt="" width="64" height="64" />`;
+
+  const render = () => {
+      const tabs = `<div class="auth-tabs" role="tablist"><button role="tab" data-au="tab" data-t="signin" class="${tab === 'signin' ? 'is-active' : ''}" aria-selected="${tab === 'signin'}">Sign In</button><button role="tab" data-au="tab" data-t="register" class="${tab === 'register' ? 'is-active' : ''}" aria-selected="${tab === 'register'}">Register</button></div>`;
+    let body;
+    if (user) {
+      body = `${mark}<h2>Signed in</h2><p class="auth-sub">Account ending in <b>${esc(user.last4)}</b></p>
+        <div class="auth-field"><label for="au-name">Display name</label><div class="auth-input"><input id="au-name" type="text" maxlength="32" value="${esc(user.name || '')}" placeholder="user-${esc(user.last4)}" autocomplete="off" /></div></div>
+        <button class="auth-primary" data-au="save-name">Save</button><button class="auth-secondary" data-au="signout">Sign out</button>`;
+    } else if (tab === 'signin') {
+      const n = formatNumber(value); const ok = digitsOnly(value).length === 16;
+      body = `${mark}<h2>Welcome back</h2><p class="auth-sub">Enter your 16-digit account number</p>${tabs}
+        <div class="auth-input${error ? ' has-error' : ''}"><input id="au-num" type="${reveal ? 'text' : 'password'}" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="19" value="${esc(n)}" placeholder="Enter your account number" aria-label="Account number" /><button class="auth-eye" data-au="eye" aria-label="${reveal ? 'Hide' : 'Show'} number">${icon(reveal ? 'eyeOff' : 'eye', 20)}</button></div>
+        ${error ? `<p class="auth-error" role="alert">${esc(error)}</p>` : ''}
+        <button class="auth-primary" data-au="signin" ${ok && !busy ? '' : 'disabled'}>${busy ? 'Signing in…' : 'Sign In'}</button>`;
+    } else if (!generated) {
+      body = `${mark}<h2>Create your account</h2><p class="auth-sub">Create your 16-digit account number</p>${tabs}
+        <div class="auth-keyicon">${icon('key', 22)}</div>
+        <p class="auth-note">We’ll make you a random <b>16-digit number</b>. That’s your only login, so keep it somewhere safe.</p>
+        <button class="auth-primary" data-au="generate" ${busy ? 'disabled' : ''}>${busy ? 'Generating…' : 'Generate my key'}</button>`;
+    } else {
+      body = `${mark}<h2>Your account number</h2><p class="auth-sub">Save it now. It can’t be recovered.</p>
+        <div class="auth-number" aria-live="polite"><span>${esc(formatNumber(generated))}</span><button data-au="copy" aria-label="Copy number">${icon('copy', 18)}</button></div>
+        <label class="auth-check"><input type="checkbox" id="au-saved" ${saved ? 'checked' : ''} /><span>I’ve saved my number somewhere safe</span></label>
+        <button class="auth-primary" data-au="finish" ${saved ? '' : 'disabled'}>Continue</button>`;
+    }
+    root.innerHTML = `<div class="modal auth-modal" role="dialog" aria-modal="true" aria-label="Account"><button class="auth-close" data-action="close-modal" aria-label="Close">${icon('x', 18)}</button>${body}</div>`;
+    const inp = root.querySelector('#au-num') || root.querySelector('#au-name');
+    if (inp) { inp.focus(); const L = inp.value.length; try { inp.setSelectionRange(L, L); } catch { /* ignore */ } }
+  };
+  const doSignIn = async () => { if (busy || digitsOnly(value).length !== 16) return; busy = true; error = ''; render(); const r = await auth.signIn(value); busy = false; if (r.ok) { closeModal(); toast('Signed in'); document.dispatchEvent(new CustomEvent('app:rerender')); } else { error = r.error; render(); } };
+  root.addEventListener('click', async e => {
+    if (e.target === root || e.target.closest('[data-action="close-modal"]')) { closeModal(); return; }
+    const t = e.target.closest('[data-au]'); if (!t) return; const act = t.dataset.au;
+    if (act === 'tab') { tab = t.dataset.t; error = ''; value = ''; generated = null; saved = false; render(); }
+    else if (act === 'eye') { reveal = !reveal; render(); }
+    else if (act === 'signin') doSignIn();
+    else if (act === 'generate') { busy = true; render(); generated = await auth.register(); busy = false; render(); }
+    else if (act === 'copy') { try { await navigator.clipboard.writeText(digitsOnly(generated)); toast('Copied to clipboard', 'copy'); } catch { toast('Select and copy the number manually', 'info'); } }
+    else if (act === 'finish') { await auth.completeRegistration(generated); closeModal(); toast('Account created'); document.dispatchEvent(new CustomEvent('app:rerender')); }
+    else if (act === 'save-name') { auth.setName(root.querySelector('#au-name').value); closeModal(); toast('Profile updated'); document.dispatchEvent(new CustomEvent('app:rerender')); }
+    else if (act === 'signout') { auth.signOut(); closeModal(); toast('Signed out'); document.dispatchEvent(new CustomEvent('app:rerender')); }
   });
+  root.addEventListener('input', e => {
+    if (e.target.id === 'au-num') { const raw = digitsOnly(e.target.value).slice(0, 16); value = raw; error = ''; const f = formatNumber(raw); e.target.value = f; const btn = root.querySelector('[data-au="signin"]'); if (btn) btn.disabled = raw.length !== 16; root.querySelector('.auth-error')?.remove(); root.querySelector('.auth-input')?.classList.remove('has-error'); }
+    if (e.target.id === 'au-saved') { saved = e.target.checked; root.querySelector('[data-au="finish"]').disabled = !saved; }
+  });
+  root.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'au-num') doSignIn(); if (e.key === 'Escape') closeModal(); });
+  render();
+}
+
+// ---- downloads ------------------------------------------------------------
+export function downloadModal(title) {
+  const root = modal('', {}); root.classList.add('is-center');
+  const render = () => {
+    root.querySelector('.modal').className = 'modal download-modal';
+    root.querySelector('.modal').innerHTML = `<div class="dl-head"><h2 class="clamp-1">Downloads for ${esc(title || 'this title')}</h2><button class="auth-close is-inline" data-action="close-modal" aria-label="Close">${icon('x', 18)}</button></div>
+      <div class="dl-body"><span class="dl-icon">${icon('download', 36)}</span><p>No downloads are available. This recreation has no media sources configured.</p><button class="pill-btn is-small" data-dl="retry">${icon('refresh', 14)}<span>Try again</span></button></div>`;
+  };
+  render();
+  root.addEventListener('click', e => { if (e.target.closest('[data-dl="retry"]')) { const b = e.target.closest('button'); b.disabled = true; b.querySelector('span').textContent = 'Checking…'; setTimeout(render, 700); } });
 }
 export function genreName(type, id) { return GENRES[type]?.[id] || null; }
